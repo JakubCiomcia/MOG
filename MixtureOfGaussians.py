@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 # Parametry MOG
-K = 3  # liczba Gaussów
-alpha = 0.01  # współczynnik uczenia
+K = 5  # liczba Gaussów
+alpha = 0.3  # współczynnik uczenia
 T = 0.7  # próg wag tła
 
 
