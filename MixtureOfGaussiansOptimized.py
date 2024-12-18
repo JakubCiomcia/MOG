@@ -31,7 +31,7 @@ class MixtureOfGaussians:
         self.means = np.random.rand(height, width, K) * 255.0
         self.vars = np.ones((height, width, K)) * init_var
 
-    def update(self, frame_gray, alpha=0.01, T=0.7):
+    def update(self, frame_gray, alpha=0.05, T=0.7):
         height, width = frame_gray.shape
         # Różnica między aktualną obserwacją a średnimi
         diff = np.abs(self.means - frame_gray[:, :, None])  # (h,w,K)
@@ -67,15 +67,12 @@ class MixtureOfGaussians:
         weakest_idx = np.argmin(self.weights, axis=2)
 
         # Zmiana: użycie np.where do uzyskania współrzędnych pikseli bez dopasowania
-        # -----------------------------------------
-        no_match_coords = np.where(no_match_mask)  # Pobranie współrzędnych dla pikseli bez dopasowania
+        no_match_coords = np.where(no_match_mask)  # (rows, cols)
 
+        # Aktualizacja najsłabszych składników dla pikseli bez dopasowania
         self.weights[no_match_coords[0], no_match_coords[1], weakest_idx[no_match_mask]] = alpha
         self.means[no_match_coords[0], no_match_coords[1], weakest_idx[no_match_mask]] = frame_gray[no_match_mask]
         self.vars[no_match_coords[0], no_match_coords[1], weakest_idx[no_match_mask]] = 15.0
-        # -----------------------------------------
-        # Komentarz: Zmieniono indeksowanie za pomocą np.where, aby usunąć niezgodność wymiarów
-        # podczas przypisywania wartości dla pikseli bez dopasowania.
 
         # Normalizacja wag
         sum_w = np.sum(self.weights, axis=2)
@@ -85,16 +82,35 @@ class MixtureOfGaussians:
         # Sortowanie składników wg wag malejąco
         sort_indices = np.argsort(self.weights, axis=2)[..., ::-1]
         weights_sorted = np.take_along_axis(self.weights, sort_indices, axis=2)
+        means_sorted = np.take_along_axis(self.means, sort_indices, axis=2)
+        vars_sorted = np.take_along_axis(self.vars, sort_indices, axis=2)
 
         cum_weights = np.cumsum(weights_sorted, axis=2)
-        fg_mask = np.ones((height, width), dtype=bool)
-        for i in range(self.K):
-            bg_component_mask = cum_weights[:, :, i] < T
-            original_index = sort_indices[:, :, i]
-            dist = np.abs(self.means[row_indices, col_indices, original_index] - frame_gray)
-            threshold = 2.5 * np.sqrt(self.vars[row_indices, col_indices, original_index])
-            match_bg = dist < threshold
-            fg_mask = fg_mask & ~(bg_component_mask & match_bg)
+
+        # Przygotowanie do maski ruchu
+        # Zamiast pętli, użyjemy wektorowych operacji
+        # Tworzymy maskę, która będzie oznaczać tło
+        bg_component_mask = cum_weights < T  # (h,w,K)
+
+        # Pobieramy oryginalne indeksy składników po sortowaniu
+        # Indeksy są już posortowane, więc możemy użyć zaawansowanego indeksowania
+        original_index = sort_indices  # (h,w,K)
+
+        # Obliczamy odległości i progi dla wszystkich składników jednocześnie
+        dist = np.abs(means_sorted - frame_gray[:, :, None])  # (h,w,K)
+        threshold = 2.5 * np.sqrt(vars_sorted)  # (h,w,K)
+
+        # Tworzymy maskę dopasowania do tła
+        match_bg = dist < threshold  # (h,w,K)
+
+        # Kombinujemy maskę tła i dopasowanie
+        bg_mask = bg_component_mask & match_bg  # (h,w,K)
+
+        # Sumujemy po trzecim wymiarze, aby znaleźć, czy którykolwiek składnik pasuje do tła
+        bg_mask_sum = np.any(bg_mask, axis=2)  # (h,w)
+
+        # Maskujemy maskę ruchu
+        fg_mask = ~bg_mask_sum  # (h,w)
 
         return fg_mask.astype(np.uint8) * 255
 
@@ -144,7 +160,6 @@ def main():
             listaKlatek.clear()
 
             print(srednia)
-
 
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         ax[0].imshow(frame_rgb)
